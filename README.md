@@ -33,9 +33,8 @@ It creates a Linux environment inside Termux using PRoot.
 
 ## Install
 
+### One-line Install (Recommended)
+
 ```bash
-pkg update -y
-pkg install git -y
-git clone https://github.com/Rick000000007/rootfaker-termux
-cd rootfaker-termux
-bash install.sh
+pkg install curl -y
+curl -fsSL https://raw.githubusercontent.com/Rick000000007/rootfaker-termux/main/quick-install.sh | bash
