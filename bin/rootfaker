@@ -1,57 +1,151 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
+CFG_DIR="$PREFIX/etc/rootfaker"
+CFG_FILE="$CFG_DIR/default_distro"
+BACKUP_DIR="$HOME/rootfaker-backups"
+
+mkdir -p "$CFG_DIR"
+mkdir -p "$BACKUP_DIR"
+
 # Ensure proot-distro exists
 if ! command -v proot-distro >/dev/null 2>&1; then
   pkg update -y
-  pkg install -y proot proot-distro
+  pkg install -y proot proot-distro tar
 fi
 
+# Default distro config
+if [ ! -f "$CFG_FILE" ]; then
+  echo "debian" > "$CFG_FILE"
+fi
+
+DEFAULT_DISTRO="$(cat "$CFG_FILE")"
+
+# Validate distro alias
+is_supported_distro() {
+  proot-distro list | grep -Eq "<[[:space:]]*$1[[:space:]]*>"
+}
+
+pause() {
+  echo ""
+  read -p "Press Enter to continue..." X
+}
+
+# ----------------------------
+# Menu loop
+# ----------------------------
 while true; do
+  DEFAULT_DISTRO="$(cat "$CFG_FILE")"
+
   clear
   echo "RootFaker Manager"
   echo "-----------------"
+  echo "Default distro: $DEFAULT_DISTRO"
+  echo "Backup folder:  $BACKUP_DIR"
+  echo ""
   echo "1) Install distro"
   echo "2) Login distro"
-  echo "3) List distros"
-  echo "4) Remove distro"
-  echo "5) Exit"
+  echo "3) Login default distro"
+  echo "4) List distros"
+  echo "5) Remove distro"
+  echo "6) Set default distro"
+  echo "7) Backup installed distro"
+  echo "8) Restore distro from backup"
+  echo "9) Exit"
   echo ""
 
-  read -p "Choose (1-5): " C
+  read -p "Choose (1-9): " C
 
   case "$C" in
     1)
       echo ""
       proot-distro list
       echo ""
-      read -p "Enter distro name to install (example: debian): " D
+      read -p "Enter distro alias to install (example: debian): " D
       proot-distro install "$D"
-      echo ""
-      read -p "Press Enter to continue..." X
+      pause
       ;;
     2)
       echo ""
       proot-distro list | grep installed || true
       echo ""
-      read -p "Enter distro name to login: " D
+      read -p "Enter distro alias to login: " D
       exec proot-distro login "$D" --shared-tmp
       ;;
     3)
-      echo ""
-      proot-distro list
-      echo ""
-      read -p "Press Enter to continue..." X
+      exec proot-distro login "$DEFAULT_DISTRO" --shared-tmp
       ;;
     4)
       echo ""
-      proot-distro list | grep installed || true
-      echo ""
-      read -p "Enter distro name to remove: " D
-      proot-distro remove "$D"
-      echo ""
-      read -p "Press Enter to continue..." X
+      proot-distro list
+      pause
       ;;
     5)
+      echo ""
+      proot-distro list | grep installed || true
+      echo ""
+      read -p "Enter distro alias to remove: " D
+      proot-distro remove "$D"
+      pause
+      ;;
+    6)
+      echo ""
+      echo "Supported aliases:"
+      proot-distro list | sed -n 's/.*< \(.*\) >.*/- \1/p'
+      echo ""
+      read -p "Enter new default distro alias: " NEW
+
+      if is_supported_distro "$NEW"; then
+        echo "$NEW" > "$CFG_FILE"
+        echo "✅ Default distro set to: $NEW"
+      else
+        echo "❌ '$NEW' is not supported."
+      fi
+      sleep 1
+      ;;
+    7)
+      echo ""
+      proot-distro list | grep installed || true
+      echo ""
+      read -p "Enter installed distro alias to backup: " D
+
+      TS="$(date +%Y%m%d-%H%M%S)"
+      OUT="$BACKUP_DIR/${D}-${TS}.tar.gz"
+
+      echo ""
+      echo "[*] Backing up $D..."
+      echo "    Output: $OUT"
+      echo ""
+      proot-distro backup "$D" > "$OUT"
+
+      echo ""
+      echo "✅ Backup complete!"
+      pause
+      ;;
+    8)
+      echo ""
+      echo "Available backups:"
+      echo "------------------"
+      ls -1 "$BACKUP_DIR"/*.tar.gz 2>/dev/null || echo "(No backups found)"
+      echo ""
+      read -p "Enter full backup filename (example: debian-20260219-120000.tar.gz): " F
+
+      IN="$BACKUP_DIR/$F"
+      if [ ! -f "$IN" ]; then
+        echo "❌ Backup file not found: $IN"
+        pause
+        continue
+      fi
+
+      echo ""
+      echo "[*] Restoring from: $IN"
+      echo ""
+      proot-distro restore "$IN"
+
+      echo ""
+      echo "✅ Restore complete!"
+      pause
+      ;;
+    9)
       exit 0
       ;;
     *)

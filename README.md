@@ -1,18 +1,33 @@
 # RootFaker-Termux 🔥
 
-RootFaker-Termux is a simple **fake sudo + fake root system** for Termux using **proot + proot-distro**.
+RootFaker-Termux is a simple community tool for Termux that provides:
 
-It does NOT root your Android device.
-It gives you a Linux root shell inside a proot container (Debian/Kali/Ubuntu/etc).
+- ✅ Fake `sudo`
+- ✅ `root` command (login to Linux rootfs)
+- ✅ `rootfaker` menu manager
+- ✅ Uses official `proot-distro` rootfs sources
+- ✅ Backup + Restore support
+
+⚠️ This project does NOT root Android.
+It creates a Linux environment inside Termux using PRoot.
 
 ---
 
 ## Features
-- ✅ Fake `sudo` for Termux
-- ✅ `root` command (quick root shell)
-- ✅ `rootfaker` manager menu
-- ✅ Uses official `proot-distro` rootfs sources
-- ✅ Works on all architectures automatically
+
+### RootFS Management
+- Install Linux distros (Debian, Ubuntu, Alpine, Arch, Fedora, etc.)
+- Login into installed distros
+- Remove distros safely
+
+### Fake Root System
+- `root` opens the default distro
+- `sudo <command>` runs inside the default distro
+- Inside the distro you are already root
+
+### Backup + Restore
+- Backup an installed distro to a `.tar.gz`
+- Restore later without reinstalling
 
 ---
 
