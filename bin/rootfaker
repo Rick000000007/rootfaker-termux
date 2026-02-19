@@ -1,234 +1,185 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
-VERSION="1.0.0"
+set -e
+
+VERSION="3.0.0-arch"
 
 CFG_DIR="$PREFIX/etc/rootfaker"
-CFG_FILE="$CFG_DIR/default_distro"
-BACKUP_DIR="$HOME/rootfaker-backups"
+ACTIVE_PROFILE_FILE="$CFG_DIR/active_profile"
+
+BASE_DIR="$HOME/.rootfaker"
+PROFILES_DIR="$BASE_DIR/profiles"
 
 mkdir -p "$CFG_DIR"
-mkdir -p "$BACKUP_DIR"
+mkdir -p "$PROFILES_DIR"
 
-# Ensure proot-distro exists
-if ! command -v proot-distro >/dev/null 2>&1; then
-  pkg update -y
-  pkg install -y proot proot-distro tar
-fi
+# =============================
+# Output Helpers
+# =============================
 
-# Default distro config
-if [ ! -f "$CFG_FILE" ]; then
-  echo "debian" > "$CFG_FILE"
-fi
+info()    { echo "[INFO] $1"; }
+success() { echo "[SUCCESS] $1"; }
+error()   { echo "[ERROR] $1"; }
+die()     { error "$1"; exit 1; }
 
-DEFAULT_DISTRO="$(cat "$CFG_FILE")"
+# =============================
+# Utility Functions
+# =============================
 
-pause() {
-  echo ""
-  read -p "Press Enter to continue..." X
+validate_profile_name() {
+  [[ "$1" =~ ^[a-zA-Z0-9_-]+$ ]] || die "Invalid profile name."
 }
 
-# Check if distro alias exists in supported list
-is_supported_distro() {
-  D="$1"
-  proot-distro list | grep -Eq "<[[:space:]]*$D[[:space:]]*>"
+get_active_profile() {
+  [ -f "$ACTIVE_PROFILE_FILE" ] && cat "$ACTIVE_PROFILE_FILE"
 }
 
-# Check if distro alias is installed (reliable method)
 is_installed_distro() {
-  D="$1"
-  [ -d "$PREFIX/var/lib/proot-distro/installed-rootfs/$D" ]
+  [ -d "$PREFIX/var/lib/proot-distro/installed-rootfs/$1" ]
 }
 
-# Ensure distro is installed, otherwise install it
-ensure_installed() {
-  D="$1"
+ensure_profile_dirs() {
+  mkdir -p "$PROFILES_DIR/$1/home"
+  mkdir -p "$PROFILES_DIR/$1/workspace"
+}
 
-  if is_installed_distro "$D"; then
-    return 0
+auto_install_if_missing() {
+  if ! is_installed_distro "$1"; then
+    info "Installing distro '$1'..."
+    proot-distro install "$1"
   fi
-
-  echo ""
-  echo "⚠️ '$D' is not installed."
-  echo "Installing now..."
-  echo ""
-  proot-distro install "$D"
 }
 
-# ----------------------------
-# CLI mode
-# ----------------------------
-if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
-  echo "RootFaker-Termux v$VERSION"
+# =============================
+# Commands
+# =============================
+
+cmd_help() {
+  echo "RootFaker v$VERSION"
   echo ""
   echo "Commands:"
-  echo "  rootfaker              Open menu"
-  echo "  rootfaker show-default Show default distro"
-  echo "  rootfaker default NAME Set default distro"
-  echo "  rootfaker --version    Show version"
-  echo ""
-  exit 0
-fi
+  echo "  rootfaker root"
+  echo "  rootfaker profile create <name> <distro>"
+  echo "  rootfaker profile list"
+  echo "  rootfaker profile switch <name>"
+  echo "  rootfaker profile show"
+  echo "  rootfaker profile delete <name>"
+  echo "  rootfaker doctor"
+  echo "  rootfaker --version"
+}
 
-if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
-  echo "RootFaker-Termux v$VERSION"
-  exit 0
-fi
+cmd_doctor() {
+  echo "RootFaker Doctor"
+  echo "-----------------"
 
-if [ "$1" = "show-default" ]; then
-  echo "Default distro: $DEFAULT_DISTRO"
-  exit 0
-fi
+  command -v proot-distro >/dev/null \
+    && success "proot-distro found" \
+    || error "proot-distro missing"
 
-if [ "$1" = "default" ] && [ -n "$2" ]; then
-  NEW="$2"
+  [ -d "$PROFILES_DIR" ] \
+    && success "Profiles directory OK" \
+    || error "Profiles directory missing"
 
-  if is_supported_distro "$NEW"; then
-    echo "$NEW" > "$CFG_FILE"
-    echo "✅ Default distro set to: $NEW"
-    exit 0
-  else
-    echo "❌ '$NEW' is not a supported proot-distro distribution."
-    echo ""
-    echo "Supported aliases are:"
-    proot-distro list | sed -n 's/.*< \(.*\) >.*/- \1/p'
-    exit 1
-  fi
-fi
+  ACTIVE=$(get_active_profile)
+  [ -z "$ACTIVE" ] \
+    && info "No active profile" \
+    || success "Active profile: $ACTIVE"
+}
 
-# ----------------------------
-# Menu loop
-# ----------------------------
-while true; do
-  DEFAULT_DISTRO="$(cat "$CFG_FILE")"
+cmd_profile() {
+  case "$1" in
 
-  clear
-  echo "RootFaker Manager (v$VERSION)"
-  echo "-----------------------------"
-  echo "Default distro: $DEFAULT_DISTRO"
-  echo "Backup folder:  $BACKUP_DIR"
-  echo ""
-  echo "1) Install distro"
-  echo "2) Login distro"
-  echo "3) Login default distro (auto install)"
-  echo "4) List distros"
-  echo "5) Remove distro"
-  echo "6) Set default distro"
-  echo "7) Backup installed distro"
-  echo "8) Restore distro from backup"
-  echo "9) Exit"
-  echo ""
+    create)
+      validate_profile_name "$2"
+      [ -z "$3" ] && die "Usage: profile create <name> <distro>"
 
-  read -p "Choose (1-9): " C
+      PROFILE_PATH="$PROFILES_DIR/$2"
+      [ -d "$PROFILE_PATH" ] && die "Profile already exists."
 
-  case "$C" in
-    1)
-      echo ""
-      proot-distro list
-      echo ""
-      read -p "Enter distro alias to install (example: debian): " D
-      proot-distro install "$D"
-      pause
+      mkdir -p "$PROFILE_PATH"
+      ensure_profile_dirs "$2"
+      echo "$3" > "$PROFILE_PATH/distro"
+
+      success "Profile '$2' created."
       ;;
-    2)
-      echo ""
-      proot-distro list | grep installed || true
-      echo ""
-      read -p "Enter distro alias to login: " D
-      exec proot-distro login "$D" --shared-tmp
+
+    list)
+      echo "Profiles:"
+      ls "$PROFILES_DIR" 2>/dev/null || true
       ;;
-    3)
-      ensure_installed "$DEFAULT_DISTRO"
-      exec proot-distro login "$DEFAULT_DISTRO" --shared-tmp
+
+    switch)
+      validate_profile_name "$2"
+      PROFILE_PATH="$PROFILES_DIR/$2"
+      [ ! -d "$PROFILE_PATH" ] && die "Profile does not exist."
+
+      echo "$2" > "$ACTIVE_PROFILE_FILE"
+      success "Active profile set to '$2'"
       ;;
-    4)
-      echo ""
-      proot-distro list
-      pause
+
+    show)
+      ACTIVE=$(get_active_profile)
+      [ -z "$ACTIVE" ] && die "No active profile."
+
+      DISTRO=$(cat "$PROFILES_DIR/$ACTIVE/distro")
+      echo "Active profile: $ACTIVE"
+      echo "Distro: $DISTRO"
       ;;
-    5)
-      echo ""
-      proot-distro list | grep installed || true
-      echo ""
-      read -p "Enter distro alias to remove: " D
-      proot-distro remove "$D"
-      pause
+
+    delete)
+      validate_profile_name "$2"
+      PROFILE_PATH="$PROFILES_DIR/$2"
+      [ ! -d "$PROFILE_PATH" ] && die "Profile does not exist."
+
+      ACTIVE=$(get_active_profile)
+      [ "$ACTIVE" = "$2" ] && die "Cannot delete active profile."
+
+      case "$PROFILE_PATH" in
+        "$PROFILES_DIR"/*) ;;
+        *) die "Unsafe delete blocked." ;;
+      esac
+
+      rm -rf "$PROFILE_PATH"
+      success "Profile '$2' deleted."
       ;;
-    6)
-      echo ""
-      echo "Supported aliases:"
-      proot-distro list | sed -n 's/.*< \(.*\) >.*/- \1/p'
-      echo ""
-      read -p "Enter new default distro alias: " NEW
 
-      if is_supported_distro "$NEW"; then
-        echo "$NEW" > "$CFG_FILE"
-        echo ""
-        echo "✅ Default distro set to: $NEW"
-      else
-        echo ""
-        echo "❌ '$NEW' is not supported."
-      fi
-
-      sleep 1
-      ;;
-    7)
-      echo ""
-      proot-distro list | grep installed || true
-      echo ""
-      read -p "Enter installed distro alias to backup: " D
-
-      if ! is_installed_distro "$D"; then
-        echo ""
-        echo "❌ '$D' is not installed."
-        pause
-        continue
-      fi
-
-      TS="$(date +%Y%m%d-%H%M%S)"
-      OUT="$BACKUP_DIR/${D}-${TS}.tar.gz"
-
-      echo ""
-      echo "[*] Backing up $D..."
-      echo "    Output: $OUT"
-      echo ""
-      proot-distro backup "$D" > "$OUT"
-
-      echo ""
-      echo "✅ Backup complete!"
-      pause
-      ;;
-    8)
-      echo ""
-      echo "Available backups:"
-      echo "------------------"
-      ls -1 "$BACKUP_DIR"/*.tar.gz 2>/dev/null || echo "(No backups found)"
-      echo ""
-      read -p "Enter full backup filename (example: debian-20260219-120000.tar.gz): " F
-
-      IN="$BACKUP_DIR/$F"
-      if [ ! -f "$IN" ]; then
-        echo ""
-        echo "❌ Backup file not found: $IN"
-        pause
-        continue
-      fi
-
-      echo ""
-      echo "[*] Restoring from: $IN"
-      echo ""
-      proot-distro restore "$IN"
-
-      echo ""
-      echo "✅ Restore complete!"
-      pause
-      ;;
-    9)
-      exit 0
-      ;;
     *)
-      echo ""
-      echo "❌ Invalid choice: $C"
-      sleep 1
+      die "Unknown profile command."
       ;;
   esac
-done
+}
+
+cmd_root() {
+  ACTIVE=$(get_active_profile)
+  [ -z "$ACTIVE" ] && die "No active profile."
+
+  PROFILE_PATH="$PROFILES_DIR/$ACTIVE"
+  [ ! -f "$PROFILE_PATH/distro" ] && die "Invalid profile."
+
+  DISTRO=$(cat "$PROFILE_PATH/distro")
+
+  ensure_profile_dirs "$ACTIVE"
+  auto_install_if_missing "$DISTRO"
+
+  exec proot-distro login "$DISTRO" \
+    --bind "$PROFILE_PATH/home:/root" \
+    --bind "$PROFILE_PATH/workspace:/workspace"
+}
+
+# =============================
+# Main Dispatcher
+# =============================
+
+main() {
+
+  case "$1" in
+    help|--help) cmd_help ;;
+    --version) echo "RootFaker v$VERSION" ;;
+    doctor) cmd_doctor ;;
+    profile) shift; cmd_profile "$@" ;;
+    root|"") cmd_root ;;
+    *) die "Unknown command." ;;
+  esac
+}
+
+main "$@"
