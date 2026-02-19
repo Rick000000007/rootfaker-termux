@@ -1,5 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
+VERSION="1.0.0"
+
 CFG_DIR="$PREFIX/etc/rootfaker"
 CFG_FILE="$CFG_DIR/default_distro"
 BACKUP_DIR="$HOME/rootfaker-backups"
@@ -20,15 +22,78 @@ fi
 
 DEFAULT_DISTRO="$(cat "$CFG_FILE")"
 
-# Validate distro alias
-is_supported_distro() {
-  proot-distro list | grep -Eq "<[[:space:]]*$1[[:space:]]*>"
-}
-
 pause() {
   echo ""
   read -p "Press Enter to continue..." X
 }
+
+# Check if distro alias exists in supported list
+is_supported_distro() {
+  D="$1"
+  proot-distro list | grep -Eq "<[[:space:]]*$D[[:space:]]*>"
+}
+
+# Check if distro alias is installed (reliable method)
+is_installed_distro() {
+  D="$1"
+  [ -d "$PREFIX/var/lib/proot-distro/installed-rootfs/$D" ]
+}
+
+# Ensure distro is installed, otherwise install it
+ensure_installed() {
+  D="$1"
+
+  if is_installed_distro "$D"; then
+    return 0
+  fi
+
+  echo ""
+  echo "⚠️ '$D' is not installed."
+  echo "Installing now..."
+  echo ""
+  proot-distro install "$D"
+}
+
+# ----------------------------
+# CLI mode
+# ----------------------------
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+  echo "RootFaker-Termux v$VERSION"
+  echo ""
+  echo "Commands:"
+  echo "  rootfaker              Open menu"
+  echo "  rootfaker show-default Show default distro"
+  echo "  rootfaker default NAME Set default distro"
+  echo "  rootfaker --version    Show version"
+  echo ""
+  exit 0
+fi
+
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+  echo "RootFaker-Termux v$VERSION"
+  exit 0
+fi
+
+if [ "$1" = "show-default" ]; then
+  echo "Default distro: $DEFAULT_DISTRO"
+  exit 0
+fi
+
+if [ "$1" = "default" ] && [ -n "$2" ]; then
+  NEW="$2"
+
+  if is_supported_distro "$NEW"; then
+    echo "$NEW" > "$CFG_FILE"
+    echo "✅ Default distro set to: $NEW"
+    exit 0
+  else
+    echo "❌ '$NEW' is not a supported proot-distro distribution."
+    echo ""
+    echo "Supported aliases are:"
+    proot-distro list | sed -n 's/.*< \(.*\) >.*/- \1/p'
+    exit 1
+  fi
+fi
 
 # ----------------------------
 # Menu loop
@@ -37,14 +102,14 @@ while true; do
   DEFAULT_DISTRO="$(cat "$CFG_FILE")"
 
   clear
-  echo "RootFaker Manager"
-  echo "-----------------"
+  echo "RootFaker Manager (v$VERSION)"
+  echo "-----------------------------"
   echo "Default distro: $DEFAULT_DISTRO"
   echo "Backup folder:  $BACKUP_DIR"
   echo ""
   echo "1) Install distro"
   echo "2) Login distro"
-  echo "3) Login default distro"
+  echo "3) Login default distro (auto install)"
   echo "4) List distros"
   echo "5) Remove distro"
   echo "6) Set default distro"
@@ -72,6 +137,7 @@ while true; do
       exec proot-distro login "$D" --shared-tmp
       ;;
     3)
+      ensure_installed "$DEFAULT_DISTRO"
       exec proot-distro login "$DEFAULT_DISTRO" --shared-tmp
       ;;
     4)
@@ -96,10 +162,13 @@ while true; do
 
       if is_supported_distro "$NEW"; then
         echo "$NEW" > "$CFG_FILE"
+        echo ""
         echo "✅ Default distro set to: $NEW"
       else
+        echo ""
         echo "❌ '$NEW' is not supported."
       fi
+
       sleep 1
       ;;
     7)
@@ -107,6 +176,13 @@ while true; do
       proot-distro list | grep installed || true
       echo ""
       read -p "Enter installed distro alias to backup: " D
+
+      if ! is_installed_distro "$D"; then
+        echo ""
+        echo "❌ '$D' is not installed."
+        pause
+        continue
+      fi
 
       TS="$(date +%Y%m%d-%H%M%S)"
       OUT="$BACKUP_DIR/${D}-${TS}.tar.gz"
@@ -131,6 +207,7 @@ while true; do
 
       IN="$BACKUP_DIR/$F"
       if [ ! -f "$IN" ]; then
+        echo ""
         echo "❌ Backup file not found: $IN"
         pause
         continue
