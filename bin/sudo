@@ -1,21 +1,21 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
-DEFAULT_DISTRO="debian"
-
-if ! command -v proot-distro >/dev/null 2>&1; then
-  echo "sudo: proot-distro not installed."
-  exit 1
-fi
-
-# Already inside proot
-if [ -n "$PROOT_DISTRIBUTION" ]; then
+# If already root, sudo should just run the command
+if [ "$(id -u 2>/dev/null)" = "0" ]; then
   exec "$@"
 fi
 
-# sudo with no args = open root shell
+DEFAULT_DISTRO="debian"
+
+# If proot-distro missing
+if ! command -v proot-distro >/dev/null 2>&1; then
+  echo "❌ proot-distro not installed."
+  exit 1
+fi
+
+# If no command given, open root shell
 if [ $# -eq 0 ]; then
   exec proot-distro login "$DEFAULT_DISTRO" --shared-tmp
 fi
 
-# run command in rootfs
 exec proot-distro login "$DEFAULT_DISTRO" --shared-tmp -- "$@"
