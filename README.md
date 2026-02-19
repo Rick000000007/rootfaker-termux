@@ -29,6 +29,16 @@ It creates a Linux environment inside Termux using PRoot.
 - Backup an installed distro to a `.tar.gz`
 - Restore later without reinstalling
 
+## CLI Commands (Pro)
+
+```bash
+rootfaker list
+rootfaker install <alias>
+rootfaker login <alias>
+rootfaker remove <alias>
+rootfaker show-default
+rootfaker default <alias>
+
 ---
 
 ## Install
@@ -38,3 +48,4 @@ It creates a Linux environment inside Termux using PRoot.
 ```bash
 pkg install curl -y
 curl -fsSL https://raw.githubusercontent.com/Rick000000007/rootfaker-termux/main/quick-install.sh | bash
+
