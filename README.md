@@ -49,3 +49,15 @@ rootfaker default <alias>
 pkg install curl -y
 curl -fsSL https://raw.githubusercontent.com/Rick000000007/rootfaker-termux/main/quick-install.sh | bash
 
+## Stable Core
+
+Version 3.x is the stable architecture release.
+
+It provides:
+- Profile system
+- Isolation directories
+- Structured CLI
+- Doctor diagnostics
+
+v3.x will receive only bug fixes.
+New features will land in v4.0 (RootFaker Runtime).
