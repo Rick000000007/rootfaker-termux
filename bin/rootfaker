@@ -1,27 +1,63 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
+# Ensure proot-distro exists
 if ! command -v proot-distro >/dev/null 2>&1; then
   pkg update -y
   pkg install -y proot proot-distro
 fi
 
-clear
-echo "RootFaker Manager"
-echo "-----------------"
-echo "1) Install distro"
-echo "2) Login distro"
-echo "3) List distros"
-echo "4) Remove distro"
-echo "5) Exit"
-echo ""
+while true; do
+  clear
+  echo "RootFaker Manager"
+  echo "-----------------"
+  echo "1) Install distro"
+  echo "2) Login distro"
+  echo "3) List distros"
+  echo "4) Remove distro"
+  echo "5) Exit"
+  echo ""
 
-read -p "Choose: " C
+  read -p "Choose (1-5): " C
 
-case "$C" in
-  1) proot-distro list; read -p "Distro: " D; proot-distro install "$D" ;;
-  2) read -p "Distro: " D; exec proot-distro login "$D" --shared-tmp ;;
-  3) proot-distro list ;;
-  4) read -p "Distro: " D; proot-distro remove "$D" ;;
-  5) exit 0 ;;
-  *) echo "Invalid choice" ;;
-esac
+  case "$C" in
+    1)
+      echo ""
+      proot-distro list
+      echo ""
+      read -p "Enter distro name to install (example: debian): " D
+      proot-distro install "$D"
+      echo ""
+      read -p "Press Enter to continue..." X
+      ;;
+    2)
+      echo ""
+      proot-distro list | grep installed || true
+      echo ""
+      read -p "Enter distro name to login: " D
+      exec proot-distro login "$D" --shared-tmp
+      ;;
+    3)
+      echo ""
+      proot-distro list
+      echo ""
+      read -p "Press Enter to continue..." X
+      ;;
+    4)
+      echo ""
+      proot-distro list | grep installed || true
+      echo ""
+      read -p "Enter distro name to remove: " D
+      proot-distro remove "$D"
+      echo ""
+      read -p "Press Enter to continue..." X
+      ;;
+    5)
+      exit 0
+      ;;
+    *)
+      echo ""
+      echo "❌ Invalid choice: $C"
+      sleep 1
+      ;;
+  esac
+done
