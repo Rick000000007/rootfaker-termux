@@ -1,59 +1,80 @@
 import os
-import shutil
-from runtime.utils import PROFILES_DIR, ACTIVE_PROFILE_FILE
-from runtime.config import ensure_profile_config, load_profile_config
+
+from runtime.config import load_profile_config
 from runtime.exceptions import RootFakerError
 
-
-def profile_path(name):
-    return os.path.join(PROFILES_DIR, name)
-
-
-def profile_exists(name):
-    return os.path.isdir(profile_path(name))
+BASE_DIR = os.path.expanduser("~/.rootfaker")
+PROFILES_DIR = os.path.join(BASE_DIR, "profiles")
+ACTIVE_PROFILE_FILE = os.path.join(BASE_DIR, "active_profile")
 
 
-def create_profile(name, distro):
-    if profile_exists(name):
-        raise RootFakerError(f"Profile '{name}' already exists.")
+def profile_exists(profile):
+    return os.path.isdir(os.path.join(PROFILES_DIR, profile))
 
-    os.makedirs(profile_path(name), exist_ok=True)
-    os.makedirs(os.path.join(profile_path(name), "home"), exist_ok=True)
-    os.makedirs(os.path.join(profile_path(name), "workspace"), exist_ok=True)
 
-    # Create default profile.yaml
-    ensure_profile_config(name)
+def create_profile(profile, distro):
+    profile_dir = os.path.join(PROFILES_DIR, profile)
 
-    # Overwrite distro in config
-    config = load_profile_config(name)
-    config["distro"] = distro
+    if profile_exists(profile):
+        raise RootFakerError(f"Profile '{profile}' already exists.")
 
-    config_path = os.path.join(profile_path(name), "profile.yaml")
-    import yaml
+    os.makedirs(os.path.join(profile_dir, "home"), exist_ok=True)
+    os.makedirs(os.path.join(profile_dir, "workspace"), exist_ok=True)
+
+    config_path = os.path.join(profile_dir, "profile.yaml")
+
     with open(config_path, "w") as f:
-        yaml.safe_dump(config, f)
+        f.write(
+            f"""# RootFaker Profile Configuration
 
-    print(f"[SUCCESS] Profile '{name}' created with distro '{distro}'.")
+distro: {distro}
+
+env: {{}}
+
+mounts: []
+
+runtime:
+  network: true
+  shared_tmp: true
+"""
+        )
+
+
+def delete_profile(profile):
+    profile_dir = os.path.join(PROFILES_DIR, profile)
+
+    if not profile_exists(profile):
+        raise RootFakerError(f"Profile '{profile}' does not exist.")
+
+    active = get_active_profile()
+    if active == profile:
+        raise RootFakerError(
+            "Cannot delete active profile. Switch to another profile first."
+        )
+
+    import shutil
+    shutil.rmtree(profile_dir)
 
 
 def list_profiles():
-    print("Profiles:")
-    if not os.path.isdir(PROFILES_DIR):
-        return
+    if not os.path.exists(PROFILES_DIR):
+        return []
 
-    for p in os.listdir(PROFILES_DIR):
-        if os.path.isdir(os.path.join(PROFILES_DIR, p)):
-            print(f"  {p}")
+    return sorted(
+        [
+            name
+            for name in os.listdir(PROFILES_DIR)
+            if os.path.isdir(os.path.join(PROFILES_DIR, name))
+        ]
+    )
 
 
-def switch_profile(name):
-    if not profile_exists(name):
-        raise RootFakerError(f"Profile '{name}' does not exist.")
+def switch_profile(profile):
+    if not profile_exists(profile):
+        raise RootFakerError(f"Profile '{profile}' does not exist.")
 
     with open(ACTIVE_PROFILE_FILE, "w") as f:
-        f.write(name)
-
-    print(f"[SUCCESS] Active profile: {name}")
+        f.write(profile)
 
 
 def get_active_profile():
@@ -64,28 +85,17 @@ def get_active_profile():
         return f.read().strip()
 
 
-def show_profile():
-    active = get_active_profile()
-    if not active:
-        print("No active profile.")
-        return
+def show_profile(profile):
+    config = load_profile_config(profile)
 
-    config = load_profile_config(active)
+    profile_dir = os.path.join(PROFILES_DIR, profile)
 
-    print(f"[INFO] Active profile: {active}")
-    print(f"[INFO] Distro: {config.get('distro')}")
-    print(f"[INFO] Home: {os.path.join(PROFILES_DIR, active, 'home')}")
-    print(f"[INFO] Workspace: {os.path.join(PROFILES_DIR, active, 'workspace')}")
+    home = os.path.join(profile_dir, "home")
+    workspace = os.path.join(profile_dir, "workspace")
 
-
-def delete_profile(name):
-    active = get_active_profile()
-
-    if name == active:
-        raise RootFakerError("Cannot delete active profile.")
-
-    if not profile_exists(name):
-        raise RootFakerError(f"Profile '{name}' does not exist.")
-
-    shutil.rmtree(profile_path(name))
-    print(f"[SUCCESS] Profile '{name}' deleted.")
+    return {
+        "profile": profile,
+        "distro": config["distro"],
+        "home": home,
+        "workspace": workspace,
+    }
