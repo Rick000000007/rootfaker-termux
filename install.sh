@@ -1,39 +1,66 @@
 #!/data/data/com.termux/files/usr/bin/bash
+
 set -e
 
-echo "RootFaker Termux Installer"
-echo "--------------------------"
+echo "RootFaker Runtime Installer"
+echo "----------------------------"
 
-if [ -z "$PREFIX" ]; then
-  echo "❌ Run inside Termux only."
-  exit 1
-fi
+PREFIX=${PREFIX:-/data/data/com.termux/files/usr}
+BASE_DIR="$HOME/.rootfaker"
+PROFILES_DIR="$BASE_DIR/profiles"
+RUNTIME_DEST="$PREFIX/lib/rootfaker"
+BIN_DEST="$PREFIX/bin"
 
-# If mirror issues, user must fix
-if ! pkg update -y; then
-  echo ""
-  echo "❌ pkg update failed."
-  echo "Fix mirror using: termux-change-repo"
-  exit 1
-fi
+echo "[*] Updating package lists..."
+apt update -y
 
-pkg install -y proot proot-distro curl tar
+echo "[*] Installing required system packages..."
+apt install -y \
+    python \
+    proot \
+    proot-distro \
+    curl \
+    tar
 
-mkdir -p "$PREFIX/bin"
+echo "[*] Ensuring pip exists..."
+python3 -m ensurepip --upgrade 2>/dev/null || true
 
-# Install scripts
-cp -f bin/sudo "$PREFIX/bin/sudo"
-cp -f bin/root "$PREFIX/bin/root"
-cp -f bin/rootfaker "$PREFIX/bin/rootfaker"
+echo "[*] Installing Python runtime dependencies..."
 
-chmod +x "$PREFIX/bin/sudo"
-chmod +x "$PREFIX/bin/root"
-chmod +x "$PREFIX/bin/rootfaker"
+# Install PyYAML only if missing
+python3 -c "import yaml" 2>/dev/null || pip install pyyaml
+
+echo "[*] Creating runtime directories..."
+mkdir -p "$RUNTIME_DEST"
+mkdir -p "$PROFILES_DIR"
+
+echo "[*] Deploying runtime engine..."
+rm -rf "$RUNTIME_DEST/runtime"
+cp -r runtime "$RUNTIME_DEST/"
+
+echo "[*] Deploying launcher..."
+cp bin/rootfaker "$BIN_DEST/rootfaker"
+chmod +x "$BIN_DEST/rootfaker"
+
+hash -r 2>/dev/null || true
 
 echo ""
-echo "✅ Installed commands:"
-echo "  rootfaker"
-echo "  sudo"
-echo "  root"
+echo "✅ RootFaker Runtime installed successfully."
 echo ""
-echo "Run: rootfaker"
+
+# Auto-create default profile if none exists
+if [ ! -f "$BASE_DIR/active_profile" ]; then
+    echo "[*] No active profile detected."
+    echo "[*] Installing default distro (debian)..."
+    proot-distro install debian || true
+
+    echo "[*] Creating default profile..."
+    "$BIN_DEST/rootfaker" profile create default debian || true
+    "$BIN_DEST/rootfaker" profile switch default || true
+
+    echo "✔ Default profile 'default' created."
+fi
+
+echo ""
+echo "Installation complete."
+echo "Run: rootfaker --version"
