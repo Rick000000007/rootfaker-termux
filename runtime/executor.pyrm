@@ -1,0 +1,118 @@
+nano runtime/executor.pyimport os
+import subprocess
+
+from runtime.config import load_profile_config
+from runtime.exceptions import RootFakerError
+from runtime.logging import info
+
+
+DEFAULT_FAKE_KERNEL_RELEASE = "6.17.0-PRoot-Distro"
+
+
+def get_rootfs_path(distro):
+    prefix = os.environ.get("PREFIX", "")
+    return os.path.join(
+        prefix,
+        "var",
+        "lib",
+        "proot-distro",
+        "installed-rootfs",
+        distro,
+    )
+
+
+def is_distro_installed(distro):
+    return os.path.isdir(get_rootfs_path(distro))
+
+
+def ensure_distro_ready(distro):
+    if is_distro_installed(distro):
+        return
+
+    info(f"Distro '{distro}' not installed. Installing automatically...")
+
+    result = subprocess.run(["proot-distro", "install", distro])
+    if result.returncode != 0:
+        raise RootFakerError(
+            f"Distro '{distro}' is not supported by proot-distro."
+        )
+
+
+def build_core_binds(rootfs):
+    return [
+        "--bind=/dev",
+        "--bind=/dev/urandom:/dev/random",
+        "--bind=/proc",
+        "--bind=/proc/self/fd:/dev/fd",
+        "--bind=/proc/self/fd/0:/dev/stdin",
+        "--bind=/proc/self/fd/1:/dev/stdout",
+        "--bind=/proc/self/fd/2:/dev/stderr",
+        "--bind=/sys",
+        f"--bind={rootfs}/proc/.loadavg:/proc/loadavg",
+        f"--bind={rootfs}/proc/.stat:/proc/stat",
+        f"--bind={rootfs}/proc/.uptime:/proc/uptime",
+        f"--bind={rootfs}/proc/.version:/proc/version",
+        f"--bind={rootfs}/proc/.vmstat:/proc/vmstat",
+        f"--bind={rootfs}/proc/.sysctl_entry_cap_last_cap:/proc/sys/kernel/cap_last_cap",
+        f"--bind={rootfs}/proc/.sysctl_inotify_max_user_watches:/proc/sys/fs/inotify/max_user_watches",
+        f"--bind={rootfs}/sys/.empty:/sys/fs/selinux",
+    ]
+
+
+def exec_in_profile(profile, command):
+    config = load_profile_config(profile)
+    distro = config["distro"]
+
+    ensure_distro_ready(distro)
+
+    rootfs = get_rootfs_path(distro)
+    profile_dir = os.path.expanduser(f"~/.rootfaker/profiles/{profile}")
+
+    home = os.path.join(profile_dir, "home")
+    workspace = os.path.join(profile_dir, "workspace")
+
+    os.makedirs(home, exist_ok=True)
+    os.makedirs(workspace, exist_ok=True)
+
+    binds = build_core_binds(rootfs)
+
+    # Profile binds
+    binds += [
+        f"--bind={home}:/root",
+        f"--bind={workspace}:/workspace",
+    ]
+
+    # YAML mounts
+    for m in config.get("mounts", []):
+        host = os.path.expanduser(m["host"])
+        guest = m["guest"]
+        readonly = m.get("readonly", False)
+
+        if readonly:
+            binds.append(f"--bind={host}:{guest}:ro")
+        else:
+            binds.append(f"--bind={host}:{guest}")
+
+    cmd = [
+        "proot",
+        "-L",
+        f"--kernel-release={DEFAULT_FAKE_KERNEL_RELEASE}",
+        "--link2symlink",
+        "--kill-on-exit",
+        "--rootfs", rootfs,
+        "--root-id",
+        "--cwd=/root",
+    ] + binds + [
+        "/usr/bin/env",
+        "-i",
+        "HOME=/root",
+        "LANG=C.UTF-8",
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "TERM=xterm-256color",
+        "TMPDIR=/tmp",
+        "/bin/sh",
+        "-c",
+        " ".join(command),
+    ]
+
+    subprocess.run(cmd)

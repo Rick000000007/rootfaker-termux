@@ -6,13 +6,9 @@ from runtime.exceptions import RootFakerError
 from runtime.logging import info
 
 
-# ============================================
-# DISTRO LIFECYCLE ENGINE (FINAL CORRECT LOGIC)
-# ============================================
-
-def is_distro_installed(distro):
+def get_rootfs_path(distro):
     prefix = os.environ.get("PREFIX", "")
-    path = os.path.join(
+    return os.path.join(
         prefix,
         "var",
         "lib",
@@ -20,35 +16,23 @@ def is_distro_installed(distro):
         "installed-rootfs",
         distro,
     )
-    return os.path.isdir(path)
+
+
+def is_distro_installed(distro):
+    return os.path.isdir(get_rootfs_path(distro))
 
 
 def ensure_distro_ready(distro):
-    """
-    Lifecycle logic:
-    - If installed → OK
-    - If not installed → attempt install
-    - If install fails → unsupported distro
-    """
-
     if is_distro_installed(distro):
         return
 
     info(f"Distro '{distro}' not installed. Installing automatically...")
-
-    result = subprocess.run(
-        ["proot-distro", "install", distro]
-    )
-
+    result = subprocess.run(["proot-distro", "install", distro])
     if result.returncode != 0:
         raise RootFakerError(
             f"Distro '{distro}' is not supported by proot-distro."
         )
 
-
-# ============================================
-# EXECUTION ENGINE
-# ============================================
 
 def exec_in_profile(profile, command):
     config = load_profile_config(profile)
@@ -57,33 +41,32 @@ def exec_in_profile(profile, command):
     ensure_distro_ready(distro)
 
     profile_dir = os.path.expanduser(f"~/.rootfaker/profiles/{profile}")
-    home_dir = os.path.join(profile_dir, "home")
-    workspace_dir = os.path.join(profile_dir, "workspace")
+    home = os.path.join(profile_dir, "home")
+    workspace = os.path.join(profile_dir, "workspace")
 
-    os.makedirs(home_dir, exist_ok=True)
-    os.makedirs(workspace_dir, exist_ok=True)
-
-    bind_args = []
-
-    # Default mounts
-    bind_args += ["--bind", f"{home_dir}:/root"]
-    bind_args += ["--bind", f"{workspace_dir}:/workspace"]
-
-    # YAML-defined mounts
-    for m in config.get("mounts", []):
-        host = os.path.expanduser(m["host"])
-        guest = m["guest"]
-        bind_args += ["--bind", f"{host}:{guest}"]
-
-    # Environment variables
-    env_args = []
-    for key, value in config.get("env", {}).items():
-        env_args += ["--env", f"{key}={value}"]
+    os.makedirs(home, exist_ok=True)
+    os.makedirs(workspace, exist_ok=True)
 
     cmd = [
         "proot-distro",
         "login",
-        distro,
-    ] + bind_args + env_args + ["--"] + command
+    ]
+
+    # Add bind mounts BEFORE distro name
+    cmd += ["--bind", f"{home}:/root"]
+    cmd += ["--bind", f"{workspace}:/workspace"]
+
+    for m in config.get("mounts", []):
+        host = os.path.expanduser(m["host"])
+        guest = m["guest"]
+        readonly = m.get("readonly", False)
+
+        if readonly:
+            cmd += ["--bind", f"{host}:{guest}:ro"]
+        else:
+            cmd += ["--bind", f"{host}:{guest}"]
+
+    # Now specify distro
+    cmd += [distro, "--", "/bin/sh", "-c", " ".join(command)]
 
     subprocess.run(cmd)
