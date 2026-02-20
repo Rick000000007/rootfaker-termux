@@ -52,10 +52,11 @@ def exec_in_profile(profile, command):
         "login",
     ]
 
-    # Add bind mounts BEFORE distro name
+    # Profile isolation binds
     cmd += ["--bind", f"{home}:/root"]
     cmd += ["--bind", f"{workspace}:/workspace"]
 
+    # YAML mounts
     for m in config.get("mounts", []):
         host = os.path.expanduser(m["host"])
         guest = m["guest"]
@@ -66,7 +67,20 @@ def exec_in_profile(profile, command):
         else:
             cmd += ["--bind", f"{host}:{guest}"]
 
-    # Now specify distro
-    cmd += [distro, "--", "/bin/sh", "-c", " ".join(command)]
+    # Build environment variable injection
+    env_vars = config.get("env", {})
+    env_string = ""
+
+    for key, value in env_vars.items():
+        env_string += f"{key}='{value}' "
+
+    # Final execution command
+    cmd += [
+        distro,
+        "--",
+        "/bin/sh",
+        "-c",
+        f"{env_string}{' '.join(command)}",
+    ]
 
     subprocess.run(cmd)
