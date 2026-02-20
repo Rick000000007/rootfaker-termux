@@ -1,103 +1,91 @@
 import os
-import subprocess
-from runtime.utils import (
-    PROFILES_DIR,
-    ACTIVE_PROFILE_FILE,
-    ensure_dirs,
-    info,
-    success,
-    error,
-)
+import shutil
+from runtime.utils import PROFILES_DIR, ACTIVE_PROFILE_FILE
+from runtime.config import ensure_profile_config, load_profile_config
+from runtime.exceptions import RootFakerError
 
-# =============================
-# Helpers
-# =============================
 
 def profile_path(name):
     return os.path.join(PROFILES_DIR, name)
 
+
 def profile_exists(name):
     return os.path.isdir(profile_path(name))
 
-def get_profile_distro(name):
-    distro_file = os.path.join(profile_path(name), "distro")
-    if os.path.isfile(distro_file):
-        with open(distro_file, "r") as f:
-            return f.read().strip()
-    return None
-
-
-# =============================
-# Profile Operations
-# =============================
 
 def create_profile(name, distro):
-    ensure_dirs()
-
     if profile_exists(name):
-        error(f"Profile '{name}' already exists.")
-        return
+        raise RootFakerError(f"Profile '{name}' already exists.")
 
-    path = profile_path(name)
-    os.makedirs(os.path.join(path, "home"), exist_ok=True)
-    os.makedirs(os.path.join(path, "workspace"), exist_ok=True)
+    os.makedirs(profile_path(name), exist_ok=True)
+    os.makedirs(os.path.join(profile_path(name), "home"), exist_ok=True)
+    os.makedirs(os.path.join(profile_path(name), "workspace"), exist_ok=True)
 
-    with open(os.path.join(path, "distro"), "w") as f:
-        f.write(distro)
+    # Create default profile.yaml
+    ensure_profile_config(name)
 
-    success(f"Profile '{name}' created with distro '{distro}'.")
+    # Overwrite distro in config
+    config = load_profile_config(name)
+    config["distro"] = distro
+
+    config_path = os.path.join(profile_path(name), "profile.yaml")
+    import yaml
+    with open(config_path, "w") as f:
+        yaml.safe_dump(config, f)
+
+    print(f"[SUCCESS] Profile '{name}' created with distro '{distro}'.")
 
 
 def list_profiles():
-    ensure_dirs()
-
     print("Profiles:")
-    for name in os.listdir(PROFILES_DIR):
-        print(f"  {name}")
+    if not os.path.isdir(PROFILES_DIR):
+        return
+
+    for p in os.listdir(PROFILES_DIR):
+        if os.path.isdir(os.path.join(PROFILES_DIR, p)):
+            print(f"  {p}")
 
 
 def switch_profile(name):
-    ensure_dirs()
-
     if not profile_exists(name):
-        error(f"Profile '{name}' does not exist.")
-        return
+        raise RootFakerError(f"Profile '{name}' does not exist.")
 
     with open(ACTIVE_PROFILE_FILE, "w") as f:
         f.write(name)
 
-    success(f"Active profile: {name}")
+    print(f"[SUCCESS] Active profile: {name}")
+
+
+def get_active_profile():
+    if not os.path.exists(ACTIVE_PROFILE_FILE):
+        return None
+
+    with open(ACTIVE_PROFILE_FILE, "r") as f:
+        return f.read().strip()
 
 
 def show_profile():
-    ensure_dirs()
-
-    if not os.path.isfile(ACTIVE_PROFILE_FILE):
-        error("No active profile set.")
+    active = get_active_profile()
+    if not active:
+        print("No active profile.")
         return
 
-    with open(ACTIVE_PROFILE_FILE, "r") as f:
-        active = f.read().strip()
+    config = load_profile_config(active)
 
-    distro = get_profile_distro(active)
-
-    info(f"Active profile: {active}")
-    info(f"Distro: {distro}")
+    print(f"[INFO] Active profile: {active}")
+    print(f"[INFO] Distro: {config.get('distro')}")
+    print(f"[INFO] Home: {os.path.join(PROFILES_DIR, active, 'home')}")
+    print(f"[INFO] Workspace: {os.path.join(PROFILES_DIR, active, 'workspace')}")
 
 
 def delete_profile(name):
-    ensure_dirs()
+    active = get_active_profile()
+
+    if name == active:
+        raise RootFakerError("Cannot delete active profile.")
 
     if not profile_exists(name):
-        error(f"Profile '{name}' does not exist.")
-        return
+        raise RootFakerError(f"Profile '{name}' does not exist.")
 
-    if os.path.isfile(ACTIVE_PROFILE_FILE):
-        with open(ACTIVE_PROFILE_FILE, "r") as f:
-            active = f.read().strip()
-        if active == name:
-            error("Cannot delete active profile. Switch first.")
-            return
-
-    subprocess.run(["rm", "-rf", profile_path(name)])
-    success(f"Profile '{name}' deleted.")
+    shutil.rmtree(profile_path(name))
+    print(f"[SUCCESS] Profile '{name}' deleted.")

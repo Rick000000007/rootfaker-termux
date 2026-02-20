@@ -1,83 +1,89 @@
 import os
 import subprocess
-from runtime.utils import PROFILES_DIR
-from runtime.exceptions import ProfileNotFound, RuntimeExecutionError
-from runtime.logging import info
+
 from runtime.config import load_profile_config
+from runtime.exceptions import RootFakerError
+from runtime.logging import info
 
 
-def exec_in_profile(name, command_args):
-    profile_path = os.path.join(PROFILES_DIR, name)
+# ============================================
+# DISTRO LIFECYCLE ENGINE (FINAL CORRECT LOGIC)
+# ============================================
 
-    if not os.path.exists(profile_path):
-        raise ProfileNotFound(f"Profile '{name}' does not exist.")
-
-    distro_file = os.path.join(profile_path, "distro")
-
-    if not os.path.exists(distro_file):
-        raise RuntimeExecutionError("Profile distro file missing.")
-
-    with open(distro_file, "r") as f:
-        distro = f.read().strip()
-
-    home_dir = os.path.join(profile_path, "home")
-    workspace_dir = os.path.join(profile_path, "workspace")
-
-    # Load profile.yaml
-    config = load_profile_config(profile_path)
-    env_vars = config.get("env", {})
-    mounts = config.get("mounts", [])
-
-    # Auto-install distro if missing
-    installed_rootfs = os.path.join(
-        os.environ.get("PREFIX", "/data/data/com.termux/files/usr"),
-        "var/lib/proot-distro/installed-rootfs",
+def is_distro_installed(distro):
+    prefix = os.environ.get("PREFIX", "")
+    path = os.path.join(
+        prefix,
+        "var",
+        "lib",
+        "proot-distro",
+        "installed-rootfs",
         distro,
     )
+    return os.path.isdir(path)
 
-    if not os.path.exists(installed_rootfs):
-        info(f"Installing distro '{distro}'...")
-        subprocess.run(["proot-distro", "install", distro], check=True)
 
-    # Base proot command
-    proot_command = [
+def ensure_distro_ready(distro):
+    """
+    Lifecycle logic:
+    - If installed → OK
+    - If not installed → attempt install
+    - If install fails → unsupported distro
+    """
+
+    if is_distro_installed(distro):
+        return
+
+    info(f"Distro '{distro}' not installed. Installing automatically...")
+
+    result = subprocess.run(
+        ["proot-distro", "install", distro]
+    )
+
+    if result.returncode != 0:
+        raise RootFakerError(
+            f"Distro '{distro}' is not supported by proot-distro."
+        )
+
+
+# ============================================
+# EXECUTION ENGINE
+# ============================================
+
+def exec_in_profile(profile, command):
+    config = load_profile_config(profile)
+    distro = config["distro"]
+
+    ensure_distro_ready(distro)
+
+    profile_dir = os.path.expanduser(f"~/.rootfaker/profiles/{profile}")
+    home_dir = os.path.join(profile_dir, "home")
+    workspace_dir = os.path.join(profile_dir, "workspace")
+
+    os.makedirs(home_dir, exist_ok=True)
+    os.makedirs(workspace_dir, exist_ok=True)
+
+    bind_args = []
+
+    # Default mounts
+    bind_args += ["--bind", f"{home_dir}:/root"]
+    bind_args += ["--bind", f"{workspace_dir}:/workspace"]
+
+    # YAML-defined mounts
+    for m in config.get("mounts", []):
+        host = os.path.expanduser(m["host"])
+        guest = m["guest"]
+        bind_args += ["--bind", f"{host}:{guest}"]
+
+    # Environment variables
+    env_args = []
+    for key, value in config.get("env", {}).items():
+        env_args += ["--env", f"{key}={value}"]
+
+    cmd = [
         "proot-distro",
         "login",
         distro,
-        "--bind",
-        f"{home_dir}:/root",
-        "--bind",
-        f"{workspace_dir}:/workspace",
-    ]
+    ] + bind_args + env_args + ["--"] + command
 
-    # Inject dynamic mounts
-    for mount in mounts:
-        if ":" not in mount:
-            raise RuntimeExecutionError(
-                f"Invalid mount format: '{mount}'. Use host_path:container_path"
-            )
-
-        host, container = mount.split(":", 1)
-
-        host = os.path.expanduser(host)
-
-        if not os.path.exists(host):
-            raise RuntimeExecutionError(
-                f"Host path does not exist: {host}"
-            )
-
-        proot_command.extend(["--bind", f"{host}:{container}"])
-
-    # Inject environment variables
-    for key, value in env_vars.items():
-        proot_command.extend(["--env", f"{key}={value}"])
-
-    proot_command.append("--")
-    proot_command.extend(command_args)
-
-    result = subprocess.run(proot_command)
-
-    if result.returncode != 0:
-        raise RuntimeExecutionError(
-            f"Command exited with code {result.returncode}"
-        )
+    subprocess.run(cmd)
