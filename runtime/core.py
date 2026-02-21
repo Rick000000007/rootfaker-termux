@@ -1,127 +1,146 @@
 import sys
-import traceback
 
-from runtime.exceptions import RootFakerError
 from runtime.profiles import (
     create_profile,
     delete_profile,
     list_profiles,
     switch_profile,
-    get_active_profile,
     show_profile,
-    profile_exists,
+    get_active_profile,
 )
-from runtime.executor import exec_in_profile
+from runtime.executor import exec_in_profile, launch_desktop
+from runtime.logging import error
+
+VERSION = "4.2.0-dev"
 
 
-VERSION = "4.1.0-beta"
+def show_help():
+    active = get_active_profile()
+    print(f"""RootFaker Runtime v{VERSION}
+------------------------------
+Active Profile: {active if active else "None"}
+
+Usage:
+  rootfaker <command> [options]
+
+Profile Management:
+  rootfaker profile create <name> <distro>
+  rootfaker profile delete <name>
+  rootfaker profile list
+  rootfaker profile switch <name>
+  rootfaker profile show [name]
+
+Execution:
+  rootfaker exec [profile] <command>
+  rootfaker desktop [profile]
+
+Diagnostics:
+  rootfaker doctor
+
+Other:
+  rootfaker --version
+  rootfaker help
+""")
 
 
-def safe_main():
-    try:
-        main()
-    except RootFakerError as e:
-        print(f"[ERROR] {e}")
+def resolve_profile_arg(index):
+    """
+    If argument at position index exists → use it.
+    Otherwise fallback to active profile.
+    """
+    if len(sys.argv) > index:
+        return sys.argv[index]
+
+    active = get_active_profile()
+    if not active:
+        error("No profile specified and no active profile set.")
         sys.exit(1)
-    except KeyboardInterrupt:
-        print("\n[INFO] Aborted.")
-        sys.exit(130)
-    except Exception:
-        print("[FATAL] Unexpected internal error.")
-        sys.exit(2)
+
+    return active
 
 
 def main():
-    args = sys.argv[1:]
-
-    if not args:
-        print("RootFaker Runtime v" + VERSION)
-        print("Use: rootfaker help")
+    if len(sys.argv) == 1:
+        show_help()
         return
 
-    cmd = args[0]
+    cmd = sys.argv[1]
 
-    # ---------------- VERSION ----------------
-    if cmd == "--version":
-        print("RootFaker Runtime v" + VERSION)
-        return
+    try:
+        if cmd == "--version":
+            print(f"RootFaker Runtime v{VERSION}")
 
-    # ---------------- HELP ----------------
-    if cmd == "help":
-        print("Commands:")
-        print("  rootfaker profile create <name> <distro>")
-        print("  rootfaker profile delete <name>")
-        print("  rootfaker profile list")
-        print("  rootfaker profile switch <name>")
-        print("  rootfaker profile show")
-        print("  rootfaker exec <profile> <command>")
-        print("  rootfaker --version")
-        return
+        elif cmd == "help":
+            show_help()
 
-    # ---------------- PROFILE ----------------
-    if cmd == "profile":
-        if len(args) < 2:
-            raise RootFakerError("Profile command requires subcommand.")
+        elif cmd == "profile":
+            if len(sys.argv) < 3:
+                error("Profile command requires subcommand.")
+                return
 
-        sub = args[1]
+            sub = sys.argv[2]
 
-        if sub == "create":
-            if len(args) != 4:
-                raise RootFakerError("Usage: rootfaker profile create <name> <distro>")
-            create_profile(args[2], args[3])
-            print(f"[SUCCESS] Profile '{args[2]}' created.")
-            return
+            if sub == "create":
+                if len(sys.argv) != 5:
+                    error("Usage: rootfaker profile create <name> <distro>")
+                    return
+                create_profile(sys.argv[3], sys.argv[4])
 
-        if sub == "delete":
-            if len(args) != 3:
-                raise RootFakerError("Usage: rootfaker profile delete <name>")
-            delete_profile(args[2])
-            print(f"[SUCCESS] Profile '{args[2]}' deleted.")
-            return
+            elif sub == "delete":
+                if len(sys.argv) != 4:
+                    error("Usage: rootfaker profile delete <name>")
+                    return
+                delete_profile(sys.argv[3])
 
-        if sub == "list":
-            profiles = list_profiles()
-            print("Profiles:")
-            for p in profiles:
-                print(" ", p)
-            return
+            elif sub == "list":
+                list_profiles()
 
-        if sub == "switch":
-            if len(args) != 3:
-                raise RootFakerError("Usage: rootfaker profile switch <name>")
-            switch_profile(args[2])
-            print(f"[SUCCESS] Active profile: {args[2]}")
-            return
+            elif sub == "switch":
+                if len(sys.argv) != 4:
+                    error("Usage: rootfaker profile switch <name>")
+                    return
+                switch_profile(sys.argv[3])
 
-        if sub == "show":
-            profile = get_active_profile()
+            elif sub == "show":
+                profile = resolve_profile_arg(3)
+                show_profile(profile)
+
+            else:
+                error("Invalid profile command.")
+
+        elif cmd == "exec":
+            if len(sys.argv) < 3:
+                error("Usage: rootfaker exec [profile] <command>")
+                return
+
+            # If user gave profile explicitly
+            if len(sys.argv) >= 4 and not sys.argv[2].startswith("-"):
+                profile = sys.argv[2]
+                command = sys.argv[3:]
+            else:
+                profile = get_active_profile()
+                command = sys.argv[2:]
+
             if not profile:
-                raise RootFakerError("No active profile.")
-            data = show_profile(profile)
-            print(f"[INFO] Active profile: {data['profile']}")
-            print(f"[INFO] Distro: {data['distro']}")
-            print(f"[INFO] Home: {data['home']}")
-            print(f"[INFO] Workspace: {data['workspace']}")
-            return
+                error("No profile specified and no active profile set.")
+                return
 
-        raise RootFakerError("Unknown profile subcommand.")
+            if not command:
+                error("No command specified.")
+                return
 
-    # ---------------- EXEC ----------------
-    if cmd == "exec":
-        if len(args) < 3:
-            raise RootFakerError("Usage: rootfaker exec <profile> <command>")
+            exec_in_profile(profile, command)
 
-        profile = args[1]
+        elif cmd == "desktop":
+            profile = resolve_profile_arg(2)
+            launch_desktop(profile)
 
-        if not profile_exists(profile):
-            raise RootFakerError(f"Profile '{profile}' does not exist.")
+        else:
+            error(f"Unknown command '{cmd}'")
 
-        command = args[2:]
-        exec_in_profile(profile, command)
-        return
-
-    raise RootFakerError("Unknown command.")
+    except Exception as e:
+        error(str(e))
 
 
 if __name__ == "__main__":
-    safe_main()
+    main()
