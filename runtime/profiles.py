@@ -1,101 +1,104 @@
 import os
+import json
 
 from runtime.config import load_profile_config
-from runtime.exceptions import RootFakerError
+from runtime.logging import info, error
 
-BASE_DIR = os.path.expanduser("~/.rootfaker")
-PROFILES_DIR = os.path.join(BASE_DIR, "profiles")
-ACTIVE_PROFILE_FILE = os.path.join(BASE_DIR, "active_profile")
-
-
-def profile_exists(profile):
-    return os.path.isdir(os.path.join(PROFILES_DIR, profile))
+ROOT_DIR = os.path.expanduser("~/.rootfaker")
+PROFILES_DIR = os.path.join(ROOT_DIR, "profiles")
+ACTIVE_FILE = os.path.join(ROOT_DIR, "active_profile")
 
 
-def create_profile(profile, distro):
-    profile_dir = os.path.join(PROFILES_DIR, profile)
+def get_active_profile():
+    if not os.path.exists(ACTIVE_FILE):
+        return None
+    with open(ACTIVE_FILE, "r") as f:
+        return f.read().strip()
 
-    if profile_exists(profile):
-        raise RootFakerError(f"Profile '{profile}' already exists.")
 
-    os.makedirs(os.path.join(profile_dir, "home"), exist_ok=True)
-    os.makedirs(os.path.join(profile_dir, "workspace"), exist_ok=True)
+def set_active_profile(name):
+    os.makedirs(ROOT_DIR, exist_ok=True)
+    with open(ACTIVE_FILE, "w") as f:
+        f.write(name)
 
-    config_path = os.path.join(profile_dir, "profile.yaml")
 
+def create_profile(name, distro):
+    profile_path = os.path.join(PROFILES_DIR, name)
+
+    if os.path.exists(profile_path):
+        error(f"Profile '{name}' already exists.")
+        return
+
+    os.makedirs(profile_path, exist_ok=True)
+    os.makedirs(os.path.join(profile_path, "home"), exist_ok=True)
+    os.makedirs(os.path.join(profile_path, "workspace"), exist_ok=True)
+
+    config_path = os.path.join(profile_path, "profile.yaml")
     with open(config_path, "w") as f:
-        f.write(
-            f"""# RootFaker Profile Configuration
+        f.write(f"distro: {distro}\n")
+        f.write("env: {}\n")
+        f.write("mounts: []\n")
+        f.write("runtime:\n")
+        f.write("  network: true\n")
+        f.write("  shared_tmp: true\n")
 
-distro: {distro}
-
-env: {{}}
-
-mounts: []
-
-runtime:
-  network: true
-  shared_tmp: true
-"""
-        )
+    info(f"Profile '{name}' created with distro '{distro}'.")
 
 
-def delete_profile(profile):
-    profile_dir = os.path.join(PROFILES_DIR, profile)
+def delete_profile(name):
+    profile_path = os.path.join(PROFILES_DIR, name)
 
-    if not profile_exists(profile):
-        raise RootFakerError(f"Profile '{profile}' does not exist.")
+    if not os.path.exists(profile_path):
+        error(f"Profile '{name}' does not exist.")
+        return
 
-    active = get_active_profile()
-    if active == profile:
-        raise RootFakerError(
-            "Cannot delete active profile. Switch to another profile first."
-        )
+    os.system(f"rm -rf '{profile_path}'")
 
-    import shutil
-    shutil.rmtree(profile_dir)
+    if get_active_profile() == name:
+        os.remove(ACTIVE_FILE)
+
+    info(f"Profile '{name}' deleted.")
 
 
 def list_profiles():
     if not os.path.exists(PROFILES_DIR):
-        return []
+        print("No profiles found.")
+        return
 
-    return sorted(
-        [
-            name
-            for name in os.listdir(PROFILES_DIR)
-            if os.path.isdir(os.path.join(PROFILES_DIR, name))
-        ]
-    )
+    active = get_active_profile()
 
-
-def switch_profile(profile):
-    if not profile_exists(profile):
-        raise RootFakerError(f"Profile '{profile}' does not exist.")
-
-    with open(ACTIVE_PROFILE_FILE, "w") as f:
-        f.write(profile)
+    print("Available Profiles:")
+    for name in sorted(os.listdir(PROFILES_DIR)):
+        marker = " (active)" if name == active else ""
+        print(f"  - {name}{marker}")
 
 
-def get_active_profile():
-    if not os.path.exists(ACTIVE_PROFILE_FILE):
-        return None
+def switch_profile(name):
+    profile_path = os.path.join(PROFILES_DIR, name)
 
-    with open(ACTIVE_PROFILE_FILE, "r") as f:
-        return f.read().strip()
+    if not os.path.exists(profile_path):
+        error(f"Profile '{name}' does not exist.")
+        return
+
+    set_active_profile(name)
+    info(f"Active profile: {name}")
 
 
-def show_profile(profile):
-    config = load_profile_config(profile)
+def show_profile(name):
+    profile_path = os.path.join(PROFILES_DIR, name)
 
-    profile_dir = os.path.join(PROFILES_DIR, profile)
+    if not os.path.exists(profile_path):
+        error(f"Profile '{name}' does not exist.")
+        return
 
-    home = os.path.join(profile_dir, "home")
-    workspace = os.path.join(profile_dir, "workspace")
+    config = load_profile_config(name)
 
-    return {
-        "profile": profile,
-        "distro": config["distro"],
-        "home": home,
-        "workspace": workspace,
-    }
+    home = os.path.join(profile_path, "home")
+    workspace = os.path.join(profile_path, "workspace")
+
+    print("Profile Information")
+    print("-------------------")
+    print(f"Name:      {name}")
+    print(f"Distro:    {config.get('distro')}")
+    print(f"Home:      {home}")
+    print(f"Workspace: {workspace}")
